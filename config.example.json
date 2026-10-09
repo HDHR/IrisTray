@@ -1,0 +1,11 @@
+{
+  "polling_interval_sec": 30,
+  "icon_style": "badge",
+  "notify_low_battery": true,
+  "low_battery_threshold": 20,
+  "notify_critical": true,
+  "critical_threshold": 10,
+  "notify_charging": true,
+  "notify_fully_charged": true,
+  "start_with_windows": false
+}

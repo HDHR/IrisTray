@@ -1,0 +1,78 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Windows Executable (Rust)
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run Unit Tests
+        run: cargo test --release --locked
+
+      - name: Build Release Executable with Cargo
+        run: cargo build --release --locked
+
+      - name: Package Release and Compute Checksums
+        shell: pwsh
+        run: |
+          $Tag = if ($env:GITHUB_REF -like "refs/tags/*") { $env:GITHUB_REF -replace "refs/tags/", "" } else { "latest" }
+          $PkgDir = "IrisTray-release"
+          New-Item -ItemType Directory -Path $PkgDir -Force | Out-Null
+          New-Item -ItemType Directory -Path "dist" -Force | Out-Null
+
+          Copy-Item "target\release\IrisTray.exe" "dist\IrisTray.exe" -Force
+          Copy-Item "target\release\IrisTray.exe" "$PkgDir\" -Force
+          Copy-Item "README.md" "$PkgDir\" -Force
+          Copy-Item "LICENSE" "$PkgDir\" -Force
+          Copy-Item "CHANGELOG.md" "$PkgDir\" -Force
+          Copy-Item "config.example.json" "$PkgDir\" -Force
+
+          # Calculate SHA256 for standalone exe
+          $ExeHash = ((Get-FileHash -Path "dist\IrisTray.exe" -Algorithm SHA256).Hash).ToLower()
+
+          # Create portable release zip
+          $ZipName = "IrisTray-$Tag-windows-x64.zip"
+          Compress-Archive -Path "$PkgDir\*" -DestinationPath $ZipName -Force
+          $ZipHash = ((Get-FileHash -Path $ZipName -Algorithm SHA256).Hash).ToLower()
+
+          # Generate standard checksums file compatible with sha256sum -c
+          $ChecksumsContent = "$ExeHash  IrisTray.exe`n$ZipHash  $ZipName`n"
+          [System.IO.File]::WriteAllText("checksums.txt", $ChecksumsContent, [System.Text.Encoding]::ASCII)
+          Write-Output $ChecksumsContent
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: IrisTray-${{ github.ref_name || 'artifact' }}-windows-x64
+          path: |
+            dist/IrisTray.exe
+            IrisTray-*.zip
+            checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: "IRIS v2 Battery Tracker ${{ github.ref_name }}"
+          draft: false
+          prerelease: false
+          files: |
+            dist/IrisTray.exe
+            IrisTray-*.zip
+            checksums.txt
+          generate_release_notes: true

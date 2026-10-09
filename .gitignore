@@ -1,0 +1,25 @@
+# Rust / Cargo
+/target/
+**/*.rs.bk
+*.pdb
+
+# Build & Release outputs
+dist/
+build/
+IrisTray.exe
+*.zip
+checksums.txt
+
+# Local User Configurations & Cache
+config.json
+*.bak
+*.tmp
+
+# IDE & Editor Settings
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Diagnostic & Scratch Logs
+*.log
