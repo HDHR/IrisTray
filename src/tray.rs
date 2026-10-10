@@ -33,6 +33,7 @@ const NIN_KEYSELECT: u32 = WM_USER + 1;
 // Application-specific window messages (offset from WM_USER to prevent shell event collision)
 const WM_TRAYICON: u32 = WM_USER + 10;
 const WM_STATE_UPDATED: u32 = WM_USER + 11;
+const WM_STARTUP_UPDATE_CHECK: u32 = WM_USER + 12;
 
 // Menu Command IDs
 const CMD_STATUS_HEADER: usize = 1001;
@@ -48,6 +49,9 @@ const CMD_NOTIFY_CHARGING: usize = 1303;
 const CMD_NOTIFY_FULL: usize = 1304;
 const CMD_STARTUP: usize = 1401;
 const CMD_ABOUT: usize = 1501;
+const CMD_CHECK_UPDATE: usize = 1502;
+const CMD_VISIT_REPO: usize = 1503;
+const CMD_STARTUP_UPDATE_NOTIF: usize = 1504;
 const CMD_EXIT: usize = 1999;
 
 static WM_TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
@@ -178,6 +182,9 @@ impl TrayApp {
             version_nid.uID = 1;
             version_nid.Anonymous.uVersion = NOTIFYICON_VERSION_4;
             Shell_NotifyIconW(NIM_SETVERSION, &version_nid);
+
+            // Post startup update check message so it runs asynchronously after window init
+            PostMessageW(hwnd, WM_STARTUP_UPDATE_CHECK, 0, 0);
 
             Ok(())
         }
@@ -573,9 +580,11 @@ impl TrayApp {
             AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
 
             // About & Exit
-            let about_w = to_wide("\u{2139} About IRIS v2 Tracker");
+            let about_w = to_wide("\u{2139} About IrisTray");
+            let update_w = to_wide("\u{1f504} Check for Updates...");
             let exit_w = to_wide("\u{274c} Exit");
             AppendMenuW(menu, MF_STRING, CMD_ABOUT, about_w.as_ptr());
+            AppendMenuW(menu, MF_STRING, CMD_CHECK_UPDATE, update_w.as_ptr());
             AppendMenuW(menu, MF_STRING, CMD_EXIT, exit_w.as_ptr());
 
             (menu, pt)
@@ -736,12 +745,29 @@ impl TrayApp {
                 }
             }
             CMD_ABOUT => {
+                let action =
+                    crate::updater::show_about_dialog(self.hwnd, env!("CARGO_PKG_VERSION"));
+                match action {
+                    crate::updater::AboutAction::CheckUpdate => {
+                        self.handle_command(CMD_CHECK_UPDATE);
+                    }
+                    crate::updater::AboutAction::VisitRepo => {
+                        self.handle_command(CMD_VISIT_REPO);
+                    }
+                    crate::updater::AboutAction::Close => {}
+                }
+            }
+            CMD_CHECK_UPDATE => {
+                let res = crate::updater::check_for_updates();
+                crate::updater::show_update_result_dialog(self.hwnd, &res);
+            }
+            CMD_VISIT_REPO => {
+                crate::updater::open_url_in_browser(crate::updater::REPO_URL);
+            }
+            CMD_STARTUP_UPDATE_NOTIF => {
                 self.send_notification(
-                    "About IRIS v2 Battery Tracker",
-                    &format!(
-                        "Press Play IRIS v2 NearLink Battery Tracker v{}\nUltra-lightweight background system tray utility.",
-                        env!("CARGO_PKG_VERSION")
-                    ),
+                    "IrisTray Update Available",
+                    "A new version of IrisTray is available. Click 'Check for Updates...' in the tray menu to download.",
                 );
             }
             CMD_EXIT => {
@@ -888,6 +914,29 @@ unsafe extern "system" fn wnd_proc(
                     app.drain_state_updates();
                 }
             }
+            0
+        }
+        WM_STARTUP_UPDATE_CHECK => {
+            // Spawn silent background update check on app launch
+            thread::Builder::new()
+                .name("startup-update-check".to_string())
+                .spawn(move || {
+                    // Small delay to ensure tray and network are fully settled on system logon
+                    thread::sleep(Duration::from_secs(3));
+                    if let Ok(info) = crate::updater::check_for_updates() {
+                        if info.has_update {
+                            unsafe {
+                                PostMessageW(
+                                    hwnd,
+                                    WM_COMMAND,
+                                    CMD_STARTUP_UPDATE_NOTIF as WPARAM,
+                                    0,
+                                );
+                            }
+                        }
+                    }
+                })
+                .ok();
             0
         }
         WM_COMMAND => {

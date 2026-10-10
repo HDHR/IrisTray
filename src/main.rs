@@ -6,6 +6,7 @@ mod icon;
 mod mouse;
 mod single_instance;
 mod tray;
+mod updater;
 
 use single_instance::SingleInstanceGuard;
 

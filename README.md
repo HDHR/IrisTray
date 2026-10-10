@@ -20,7 +20,8 @@ A lightweight Windows system tray utility for monitoring battery and connection 
   - Manual refresh.
   - Configurable polling interval: 15 seconds, 30 seconds (default), 1 minute, 2 minutes, or 5 minutes.
   - Optional Windows notifications: Low battery (configurable threshold, default 20%), critical battery (default 10%), charging state changes, and full charge (100%).
-  - Windows autostart toggle: Configures user startup without requiring administrator privileges.
+  - Windows autostart toggle: Configures user startup with path auto-healing (relocating the executable automatically updates the Windows Run entry).
+  - Update checker: Checks for updates directly from GitHub Releases with in-app download and update capabilities.
 
 ## Installation and Usage
 
@@ -86,8 +87,8 @@ Available options:
 
 ## Privacy & Security
 
-- **100% Offline**: IrisTray has **zero** network dependencies, makes no HTTP/TCP/UDP requests, and includes no analytics, telemetry, crash reporting, or auto-updaters.
-- **Local Storage Only**: The application only stores user configuration preferences in `%APPDATA%\IrisTray\config.json` (or locally in portable mode). No personal data or mouse activity logs are recorded.
+- **No Telemetry or Tracking**: IrisTray contains **zero** analytics, tracking, telemetry, crash reporting, or background data collection.
+- **Local Storage Only**: The application only stores user configuration preferences in `%APPDATA%\IrisTray\config.json` (or locally beside the binary in portable mode). No personal data, keystrokes, mouse movements, or clicks are ever logged or monitored.
 
 ## Hardware Protocol Reference
 

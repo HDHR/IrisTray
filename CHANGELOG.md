@@ -5,6 +5,19 @@ All notable changes to IrisTray will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-10-10
+
+### Added
+- Native modern About dialog (TaskDialogIndirect) displaying version, author, and quick action buttons.
+- Direct repository link action button opening GitHub in the default browser.
+- In-app update checker querying GitHub Releases via native Windows HTTP (WinHttp).
+- In-app update download and silent binary replacement with automatic restart.
+- Silent background update check on application startup.
+- Windows autostart path auto-healing (relocating IrisTray.exe automatically heals the Windows Run registry key).
+
+### Changed
+- Refactored tray menu bottom section with clean About and Check for Updates entries.
+- Updated documentation and privacy disclosures regarding update checks.
 ## [1.0.0] - 2026-10-10
 
 ### Added
