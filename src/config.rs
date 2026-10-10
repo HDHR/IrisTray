@@ -123,9 +123,33 @@ impl ConfigManager {
         };
         cm.load();
 
-        let actual_startup = cm.is_registered_startup();
-        if cm.config.start_with_windows != actual_startup {
-            cm.config.start_with_windows = actual_startup;
+        if let Ok(exe_path) = env::current_exe() {
+            let current_exe = exe_path.to_string_lossy().to_string();
+            let normalized_current = current_exe
+                .trim()
+                .trim_matches('"')
+                .trim()
+                .replace('/', "\\")
+                .to_lowercase();
+
+            if let Some(reg_path) = Self::get_registered_startup_path() {
+                let normalized_reg = reg_path
+                    .trim()
+                    .trim_matches('"')
+                    .trim()
+                    .replace('/', "\\")
+                    .to_lowercase();
+
+                if normalized_reg != normalized_current {
+                    // Executable was moved to a new path; auto-update registry with current path
+                    cm.set_startup(true);
+                } else {
+                    cm.config.start_with_windows = true;
+                }
+            } else if cm.config.start_with_windows {
+                // Enabled in config but missing in registry; re-register current path
+                cm.set_startup(true);
+            }
         }
 
         cm
@@ -222,13 +246,7 @@ impl ConfigManager {
         }
     }
 
-    pub fn is_registered_startup(&self) -> bool {
-        let exe_path = match env::current_exe() {
-            Ok(p) => p.to_string_lossy().to_string(),
-            Err(_) => return false,
-        };
-        let normalized_exe = exe_path.trim_matches('"').replace('/', "\\").to_lowercase();
-
+    pub fn get_registered_startup_path() -> Option<String> {
         unsafe {
             let key_wide: Vec<u16> = RUN_REG_KEY
                 .encode_utf16()
@@ -262,11 +280,36 @@ impl ConfigManager {
                         raw_len
                     };
                     let reg_val = String::from_utf16_lossy(&buf[..len]);
-                    let normalized_reg =
-                        reg_val.trim_matches('"').replace('/', "\\").to_lowercase();
-                    return normalized_reg == normalized_exe;
+                    let trimmed = reg_val.trim().trim_matches('"').trim();
+                    if !trimmed.is_empty() {
+                        return Some(trimmed.to_string());
+                    }
                 }
             }
+            None
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn is_registered_startup(&self) -> bool {
+        if let (Some(reg_path), Ok(exe_path)) =
+            (Self::get_registered_startup_path(), env::current_exe())
+        {
+            let normalized_exe = exe_path
+                .to_string_lossy()
+                .trim()
+                .trim_matches('"')
+                .trim()
+                .replace('/', "\\")
+                .to_lowercase();
+            let normalized_reg = reg_path
+                .trim()
+                .trim_matches('"')
+                .trim()
+                .replace('/', "\\")
+                .to_lowercase();
+            normalized_reg == normalized_exe
+        } else {
             false
         }
     }
