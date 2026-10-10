@@ -11,10 +11,40 @@ use windows_sys::Win32::Networking::WinHttp::{
     WINHTTP_FLAG_SECURE, WINHTTP_OPTION_REDIRECT_POLICY, WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS,
     WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_QUERY_STATUS_CODE,
 };
+
+use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows_sys::Win32::UI::Controls::{
-    TaskDialogIndirect, TASKDIALOGCONFIG, TASKDIALOG_BUTTON, TDCBF_CLOSE_BUTTON, TD_ERROR_ICON,
-    TD_INFORMATION_ICON,
+    TASKDIALOGCONFIG, TASKDIALOG_BUTTON, TDCBF_CLOSE_BUTTON, TD_ERROR_ICON, TD_INFORMATION_ICON,
 };
+
+type FnTaskDialogIndirect =
+    unsafe extern "system" fn(*const TASKDIALOGCONFIG, *mut i32, *mut i32, *mut i32) -> i32;
+
+unsafe fn call_task_dialog_indirect(
+    config: *const TASKDIALOGCONFIG,
+    pn_button: *mut i32,
+    pn_radio_button: *mut i32,
+    pf_verification_flag_checked: *mut i32,
+) -> i32 {
+    let dll_name: Vec<u16> = "comctl32.dll\0".encode_utf16().collect();
+    let h_mod = LoadLibraryW(dll_name.as_ptr());
+    if h_mod == 0 {
+        return -1;
+    }
+    let fn_name = b"TaskDialogIndirect\0";
+    let proc = GetProcAddress(h_mod, fn_name.as_ptr());
+    if let Some(proc) = proc {
+        let func: FnTaskDialogIndirect = std::mem::transmute(proc);
+        func(
+            config,
+            pn_button,
+            pn_radio_button,
+            pf_verification_flag_checked,
+        )
+    } else {
+        -1
+    }
+}
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     MessageBoxW, MB_ICONERROR, MB_ICONINFORMATION, MB_OK,
 };
@@ -508,7 +538,7 @@ pub fn show_about_dialog(parent: HWND, app_version: &str) -> AboutAction {
 
     let mut button_pressed = 0;
     let hr = unsafe {
-        TaskDialogIndirect(
+        call_task_dialog_indirect(
             &config,
             &mut button_pressed,
             std::ptr::null_mut(),
@@ -577,7 +607,7 @@ pub fn show_update_result_dialog(parent: HWND, update_info: &Result<UpdateInfo, 
 
             let mut button_pressed = 0;
             let hr = unsafe {
-                TaskDialogIndirect(
+                call_task_dialog_indirect(
                     &config,
                     &mut button_pressed,
                     std::ptr::null_mut(),
@@ -620,7 +650,7 @@ pub fn show_update_result_dialog(parent: HWND, update_info: &Result<UpdateInfo, 
 
             let mut button_pressed = 0;
             let hr = unsafe {
-                TaskDialogIndirect(
+                call_task_dialog_indirect(
                     &config,
                     &mut button_pressed,
                     std::ptr::null_mut(),
@@ -660,7 +690,7 @@ pub fn show_update_result_dialog(parent: HWND, update_info: &Result<UpdateInfo, 
 
             let mut button_pressed = 0;
             let hr = unsafe {
-                TaskDialogIndirect(
+                call_task_dialog_indirect(
                     &config,
                     &mut button_pressed,
                     std::ptr::null_mut(),

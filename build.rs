@@ -6,13 +6,14 @@ fn main() {
         res.set("ProductName", "IRIS v2 Battery Tracker");
         res.set("OriginalFilename", "IrisTray.exe");
         res.set("LegalCopyright", "Copyright (c) 2026 IrisTray Contributors");
-        res.set("ProductVersion", "1.0.0.0");
-        res.set("FileVersion", "1.0.0.0");
+        res.set("ProductVersion", "1.1.1.0");
+        res.set("FileVersion", "1.1.1.0");
         res.set_version_info(
             winresource::VersionInfo::PRODUCTVERSION,
-            0x0001_0000_0000_0000,
+            0x0001_0001_0000_0000,
         );
-        res.set_version_info(winresource::VersionInfo::FILEVERSION, 0x0001_0000_0000_0000);
+        res.set_version_info(winresource::VersionInfo::FILEVERSION, 0x0001_0001_0000_0000);
+        res.set_manifest_file("IrisTray.exe.manifest");
         if let Err(e) = res.compile() {
             eprintln!("cargo:warning=Failed to compile Windows resource: {e}");
         }
