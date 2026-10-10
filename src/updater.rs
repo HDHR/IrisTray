@@ -420,26 +420,48 @@ pub fn download_file_to(url: &str, destination: &Path) -> Result<(), String> {
 
 pub fn spawn_updater_and_restart(new_exe_path: &Path) -> Result<(), String> {
     use std::env;
+    use std::os::windows::process::CommandExt;
     use std::process::Command;
 
     let current_exe = env::current_exe()
         .map_err(|e| format!("Failed to retrieve current executable path: {e}"))?;
     let pid = std::process::id();
 
+    let new_path_str = new_exe_path.display().to_string().replace('\'', "''");
+    let cur_path_str = current_exe.display().to_string().replace('\'', "''");
+
     // PowerShell updater script:
-    // 1. Wait for current PID to terminate cleanly.
-    // 2. Overwrite current executable with downloaded executable.
-    // 3. Remove downloaded temp executable.
-    // 4. Start updated application.
+    // 1. Wait for current process PID to terminate cleanly.
+    // 2. Retry loop copying downloaded executable over current executable (handles Windows file locks).
+    // 3. Clean up the downloaded temp file.
+    // 4. Launch the updated application.
     let script = format!(
-        "Start-Sleep -Milliseconds 600; Wait-Process -Id {pid} -ErrorAction SilentlyContinue; Move-Item -Path '{new_path}' -Destination '{cur_path}' -Force; Start-Process -FilePath '{cur_path}'",
+        "$p = {pid}; \
+         $n = '{new_path}'; \
+         $c = '{cur_path}'; \
+         try {{ $proc = Get-Process -Id $p -ErrorAction SilentlyContinue; if ($proc) {{ $proc.WaitForExit(5000) }} }} catch {{}}; \
+         $ok = $false; \
+         for ($i = 0; $i -lt 50; $i++) {{ \
+             try {{ \
+                 Copy-Item -LiteralPath $n -Destination $c -Force -ErrorAction Stop; \
+                 Remove-Item -LiteralPath $n -Force -ErrorAction SilentlyContinue; \
+                 $ok = $true; \
+                 break; \
+             }} catch {{ \
+                 Start-Sleep -Milliseconds 100; \
+             }} \
+         }}; \
+         if ($ok) {{ Start-Process -FilePath $c }}",
         pid = pid,
-        new_path = new_exe_path.display(),
-        cur_path = current_exe.display()
+        new_path = new_path_str,
+        cur_path = cur_path_str
     );
 
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
     Command::new("powershell")
-        .args(["-WindowStyle", "Hidden", "-Command", &script])
+        .creation_flags(CREATE_NO_WINDOW)
+        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &script])
         .spawn()
         .map_err(|e| format!("Failed to launch updater helper: {e}"))?;
 

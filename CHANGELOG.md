@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.1.2] - 2026-10-10
 
+### Fixed
+- Fixed in-app self-updater not overwriting the existing binary due to Windows PowerShell 5.1 Move-Item destination collision error.
+- Fixed console window momentarily flashing during self-update by attaching CREATE_NO_WINDOW flag.
+- Added retry loop and process exit synchronization to safely wait for Windows file locks before replacing IrisTray.exe.
+
 ### Changed
 - Updated the Windows application header and notification banner to display IrisTray vX.X.X dynamically based on the package release version.
 
