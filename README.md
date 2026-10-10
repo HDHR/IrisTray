@@ -1,4 +1,4 @@
-# IrisTray (IRIS v2 Battery Tracker)
+# IrisTray (Press Play IRIS v2 Battery Tracker)
 
 > **Disclaimer**: This is an independent, unofficial personal open-source project. It is **not** created, maintained, or endorsed by Press Play.
 
@@ -21,9 +21,6 @@ A lightweight Windows system tray utility for monitoring battery and connection 
   - Configurable polling interval: 15 seconds, 30 seconds (default), 1 minute, 2 minutes, or 5 minutes.
   - Optional Windows notifications: Low battery (configurable threshold, default 20%), critical battery (default 10%), charging state changes, and full charge (100%).
   - Windows autostart toggle: Configures user startup without requiring administrator privileges.
-- **Modern Tray Accessibility**: Implements Windows Shell `NOTIFYICON_VERSION_4` supporting keyboard navigation (<kbd>Win</kbd> + <kbd>B</kbd>, <kbd>Enter</kbd>, <kbd>Apps</kbd> key) and dark mode context menus.
-- **Single Instance**: Uses a named Win32 mutex to prevent multiple instances from running concurrently.
-- **Explorer Crash Recovery**: Listens for the `TaskbarCreated` message to automatically restore the tray icon if `explorer.exe` restarts.
 
 ## Installation and Usage
 
@@ -37,7 +34,7 @@ A lightweight Windows system tray utility for monitoring battery and connection 
 
 ### Windows SmartScreen & Security Verification
 
-Because IrisTray is an independent, non-commercial open-source project without a costly enterprise Authenticode code-signing certificate, Windows Defender SmartScreen may display an alert on first launch (*"Windows protected your PC — Microsoft Defender SmartScreen prevented an unrecognized app from starting"*).
+Because IrisTray is an independent, non-commercial open-source project without a costly enterprise Authenticode code-signing certificate, Windows Defender SmartScreen may display an alert on first launch (*"Windows protected your PC. Microsoft Defender SmartScreen prevented an unrecognized app from starting"*).
 
 To launch IrisTray:
 1. Click **More info**.
@@ -91,8 +88,6 @@ Available options:
 
 - **100% Offline**: IrisTray has **zero** network dependencies, makes no HTTP/TCP/UDP requests, and includes no analytics, telemetry, crash reporting, or auto-updaters.
 - **Local Storage Only**: The application only stores user configuration preferences in `%APPDATA%\IrisTray\config.json` (or locally in portable mode). No personal data or mouse activity logs are recorded.
-- **Safe Autostart**: When "Start with Windows" is toggled, an entry is added to `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` with properly quoted paths to prevent unquoted search path vulnerabilities. No administrator privileges are required.
-- **DLL Hijacking Protection**: System dynamic libraries (`uxtheme.dll`) are loaded strictly with `LOAD_LIBRARY_SEARCH_SYSTEM32` flags.
 
 ## Hardware Protocol Reference
 
@@ -115,13 +110,13 @@ The application interfaces directly with the device over HID:
   - Verify that the NearLink wireless dongle or USB-C cable is firmly plugged into a functional USB port.
   - If using a USB hub, ensure the hub provides adequate power to the dongle.
 - **Can I run this alongside official Press Play configuration software?**:
-  - Yes. IrisTray communicates using non-exclusive HID feature reports. You can configure DPI stages, LOD, or RGB lighting in the official software and run IrisTray simultaneously for lightweight battery monitoring.
+  - Yes. IrisTray communicates using non-exclusive HID feature reports. You can configure DPI stages, LOD, etc in the official software and run IrisTray simultaneously for lightweight battery monitoring.
 
 ## Limitations and Disclaimer
 
 - **Windows only**: Relies on Win32 APIs (`windows-sys`) for system tray integration and DPI scaling. Requires Windows 10 (1809+) or Windows 11.
 - **Read-only battery monitoring**: This utility monitors status only. Sensor settings (DPI stages, polling rate, debounce time, LOD) must be configured using the official manufacturer software to save them to the mouse's onboard memory.
-- **Trademark Disclaimer**: Press Play is a trademark of its respective owner. IRIS v2 Battery Tracker is an independent open-source utility and is not affiliated with, endorsed by, or associated with Press Play.
+- **Trademark Disclaimer**: Press Play is a trademark of its respective owner. Press Play IRIS v2 Battery Tracker is an independent open-source utility and is not affiliated with, endorsed by, or associated with Press Play.
 
 ## License
 
