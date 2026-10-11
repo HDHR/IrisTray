@@ -994,9 +994,17 @@ pub fn run_tray_app() {
     let running_worker = running.clone();
     thread::spawn(move || {
         let mut detector = IrisMouseDetector::with_initial_battery(initial_battery);
+        let mut consecutive_inactive = 0u32;
 
         while running_worker.load(Ordering::SeqCst) {
             let state = detector.query_state();
+            let is_active = state.connected && (!state.is_wireless || state.wireless_connected);
+            if is_active {
+                consecutive_inactive = 0;
+            } else {
+                consecutive_inactive = consecutive_inactive.saturating_add(1);
+            }
+
             if state_tx.send(state).is_err() {
                 break;
             }
@@ -1004,9 +1012,12 @@ pub fn run_tray_app() {
                 PostMessageW(hwnd, WM_STATE_UPDATED, 0, 0);
             }
 
-            // Wait for refresh channel or timeout using user's configured interval
-            let interval = polling_interval.load(Ordering::SeqCst).max(5);
-            let _ = refresh_rx.recv_timeout(Duration::from_secs(interval));
+            // Adaptive polling: poll quickly right after sleep/startup (3s -> 5s -> ...),
+            // ramping up smoothly until capped at the user's configured interval.
+            let configured = polling_interval.load(Ordering::SeqCst);
+            let next_interval =
+                calculate_poll_interval(is_active, consecutive_inactive, configured);
+            let _ = refresh_rx.recv_timeout(Duration::from_secs(next_interval));
         }
     });
 
@@ -1019,6 +1030,33 @@ pub fn run_tray_app() {
         }
         let _ = Box::from_raw(app_ptr);
     }
+}
+
+/// Calculates the next polling interval using an adaptive fast-retry backoff strategy.
+/// When the mouse is active, returns configured_interval.
+/// When the mouse is sleeping or offline, checks quickly (3s -> 5s -> ...) so mouse wake-up
+/// is detected almost immediately, then gradually ramps back up to configured_interval.
+pub fn calculate_poll_interval(
+    is_active: bool,
+    consecutive_inactive: u32,
+    configured_interval: u64,
+) -> u64 {
+    let configured = configured_interval.max(5);
+    if is_active {
+        return configured;
+    }
+
+    let sleep_delay = match consecutive_inactive {
+        0..=3 => 3,
+        4..=6 => 5,
+        7..=10 => 10,
+        11..=15 => 15,
+        16..=20 => 30,
+        21..=25 => 60,
+        _ => configured,
+    };
+
+    sleep_delay.min(configured)
 }
 
 #[cfg(test)]
@@ -1078,5 +1116,30 @@ mod tests {
         app.current_state.battery = 100;
         assert_eq!(app.get_menu_header_text(), "IRIS v2: 100% (Fully Charged)");
         assert!(app.get_tooltip_string().contains("100%"));
+    }
+
+    #[test]
+    fn test_calculate_poll_interval() {
+        // Active mouse always returns configured interval
+        assert_eq!(calculate_poll_interval(true, 0, 300), 300);
+        assert_eq!(calculate_poll_interval(true, 10, 300), 300);
+        assert_eq!(calculate_poll_interval(true, 0, 15), 15);
+
+        // Inactive / sleeping mouse ramps up from 3s to configured
+        assert_eq!(calculate_poll_interval(false, 1, 300), 3);
+        assert_eq!(calculate_poll_interval(false, 3, 300), 3);
+        assert_eq!(calculate_poll_interval(false, 4, 300), 5);
+        assert_eq!(calculate_poll_interval(false, 6, 300), 5);
+        assert_eq!(calculate_poll_interval(false, 7, 300), 10);
+        assert_eq!(calculate_poll_interval(false, 10, 300), 10);
+        assert_eq!(calculate_poll_interval(false, 11, 300), 15);
+        assert_eq!(calculate_poll_interval(false, 16, 300), 30);
+        assert_eq!(calculate_poll_interval(false, 21, 300), 60);
+        assert_eq!(calculate_poll_interval(false, 30, 300), 300);
+
+        // Never exceeds configured interval
+        assert_eq!(calculate_poll_interval(false, 1, 15), 3);
+        assert_eq!(calculate_poll_interval(false, 16, 15), 15);
+        assert_eq!(calculate_poll_interval(false, 30, 15), 15);
     }
 }

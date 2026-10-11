@@ -5,6 +5,11 @@ All notable changes to IrisTray will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.3] - 2026-10-11
+
+### Added
+- Adaptive fast-polling on mouse sleep and startup: automatically checks every 3-5 seconds after startup or sleep, smoothly ramping back up and capping at the user's configured polling interval (e.g. 5 minutes). Mouse wake-ups are now detected almost immediately without waiting for a long polling cycle.
+
 ## [1.1.2] - 2026-10-10
 
 ### Fixed
