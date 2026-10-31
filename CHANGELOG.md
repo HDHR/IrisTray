@@ -5,6 +5,21 @@ All notable changes to IrisTray will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.4] - 2026-11-01
+
+### Security
+- Added cryptographic SHA-256 integrity verification: in-app updater now fetches official `checksums.txt` and verifies the binary hash via native Windows BCrypt before executing updates.
+- Added version tag sanitization to prevent path traversal when composing temporary update paths in `%TEMP%`.
+- Enforced strict HTTPS scheme for update binary downloads and browser URL opening (`ShellExecuteW`).
+- Added upper bounds to network read streams (`1 MB` for GitHub release JSON, `50 MB` for binary downloads) to protect against stream exhaustion.
+- Enforced `asInvoker` execution level in application manifest (`IrisTray.exe.manifest`) to disable legacy UAC virtualization.
+- Hardened DLL loading in TaskDialog helper with `LOAD_LIBRARY_SEARCH_SYSTEM32` and freed module handles on close.
+- Hardened updater process spawning by resolving absolute path to system PowerShell, preventing CWD binary hijacking.
+- Scoped single instance mutex to `Local\` namespace for session isolation in multi-user environments.
+
+### Changed
+- Removed redundant repository link text from the About dialog description, as the "Visit Repository" action button is already present.
+
 ## [1.1.3] - 2026-10-11
 
 ### Added
