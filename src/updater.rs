@@ -65,6 +65,7 @@ pub struct UpdateInfo {
     pub has_update: bool,
     pub release_url: String,
     pub exe_download_url: Option<String>,
+    pub checksums_download_url: Option<String>,
     pub release_notes: Option<String>,
 }
 
@@ -115,6 +116,113 @@ pub fn is_newer_version(latest: &str, current: &str) -> bool {
     }
 }
 
+/// Sanitizes remote version tags into safe filename components, preventing directory traversal.
+pub fn sanitize_version_tag(tag: &str) -> String {
+    let tag_name = tag.rsplit(['/', '\\']).next().unwrap_or(tag);
+    let sanitized: String = tag_name
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '-' || *c == '_')
+        .collect();
+    let trimmed = sanitized.trim_matches('.');
+    if trimmed.is_empty() || trimmed.contains("..") {
+        "update".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Parses the expected SHA-256 hash for `target_filename` from a standard checksums file.
+pub fn parse_sha256_checksum(checksums_txt: &str, target_filename: &str) -> Option<String> {
+    for line in checksums_txt.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if parts.len() >= 2 {
+            let hash = parts[0];
+            let filename = parts[1].trim_start_matches('*');
+            if filename.eq_ignore_ascii_case(target_filename)
+                && hash.len() == 64
+                && hash.chars().all(|c| c.is_ascii_hexdigit())
+            {
+                return Some(hash.to_lowercase());
+            }
+        }
+    }
+    None
+}
+
+/// Computes the SHA-256 hash of a file using Windows native Cryptography (BCrypt).
+pub fn compute_file_sha256(path: &Path) -> Result<String, String> {
+    use std::io::Read;
+    use windows_sys::Win32::Security::Cryptography::{
+        BCryptCloseAlgorithmProvider, BCryptCreateHash, BCryptDestroyHash, BCryptFinishHash,
+        BCryptHashData, BCryptOpenAlgorithmProvider, BCRYPT_ALG_HANDLE, BCRYPT_HASH_HANDLE,
+        BCRYPT_SHA256_ALGORITHM,
+    };
+
+    let mut file = File::open(path).map_err(|e| format!("Failed to open file for hashing: {e}"))?;
+
+    unsafe {
+        let mut h_alg: BCRYPT_ALG_HANDLE = std::ptr::null_mut();
+        let status =
+            BCryptOpenAlgorithmProvider(&mut h_alg, BCRYPT_SHA256_ALGORITHM, std::ptr::null(), 0);
+        if status != 0 {
+            return Err(format!(
+                "BCryptOpenAlgorithmProvider failed with status {status:#x}"
+            ));
+        }
+
+        let mut h_hash: BCRYPT_HASH_HANDLE = std::ptr::null_mut();
+        let status = BCryptCreateHash(
+            h_alg,
+            &mut h_hash,
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+            0,
+            0,
+        );
+        if status != 0 {
+            BCryptCloseAlgorithmProvider(h_alg, 0);
+            return Err(format!("BCryptCreateHash failed with status {status:#x}"));
+        }
+
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            match file.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let status = BCryptHashData(h_hash, buffer.as_ptr() as *mut u8, n as u32, 0);
+                    if status != 0 {
+                        BCryptDestroyHash(h_hash);
+                        BCryptCloseAlgorithmProvider(h_alg, 0);
+                        return Err(format!("BCryptHashData failed with status {status:#x}"));
+                    }
+                }
+                Err(e) => {
+                    BCryptDestroyHash(h_hash);
+                    BCryptCloseAlgorithmProvider(h_alg, 0);
+                    return Err(format!("Failed to read file for hashing: {e}"));
+                }
+            }
+        }
+
+        let mut hash = [0u8; 32];
+        let status = BCryptFinishHash(h_hash, hash.as_mut_ptr(), 32, 0);
+        BCryptDestroyHash(h_hash);
+        BCryptCloseAlgorithmProvider(h_alg, 0);
+
+        if status != 0 {
+            return Err(format!("BCryptFinishHash failed with status {status:#x}"));
+        }
+
+        let hex_str = hash.iter().map(|b| format!("{:02x}", b)).collect();
+        Ok(hex_str)
+    }
+}
+
 pub fn check_for_updates() -> Result<UpdateInfo, String> {
     let current_version = env!("CARGO_PKG_VERSION").to_string();
     let body = fetch_github_latest_release_json()?;
@@ -133,6 +241,7 @@ pub fn check_for_updates() -> Result<UpdateInfo, String> {
         .to_string();
 
     let mut exe_download_url = None;
+    let mut checksums_download_url = None;
     if let Some(assets) = json["assets"].as_array() {
         for asset in assets {
             if let (Some(name), Some(url)) = (
@@ -141,7 +250,10 @@ pub fn check_for_updates() -> Result<UpdateInfo, String> {
             ) {
                 if name.eq_ignore_ascii_case("IrisTray.exe") {
                     exe_download_url = Some(url.to_string());
-                    break;
+                } else if name.eq_ignore_ascii_case("checksums.txt")
+                    || name.eq_ignore_ascii_case("sha256sums.txt")
+                {
+                    checksums_download_url = Some(url.to_string());
                 }
             }
         }
@@ -156,6 +268,7 @@ pub fn check_for_updates() -> Result<UpdateInfo, String> {
         has_update,
         release_url,
         exe_download_url,
+        checksums_download_url,
         release_notes,
     })
 }
@@ -517,40 +630,136 @@ pub fn perform_in_app_update(parent: HWND, info: &UpdateInfo) {
         }
     };
 
+    let safe_tag = sanitize_version_tag(&info.latest_version);
     let temp_dir = std::env::temp_dir();
-    let temp_new_exe = temp_dir.join(format!("IrisTray-update-{}.exe", info.latest_version));
+    let temp_new_exe = temp_dir.join(format!("IrisTray-update-{safe_tag}.exe"));
+    let temp_checksums = temp_dir.join(format!("IrisTray-checksums-{safe_tag}.txt"));
 
     // Perform download
-    match download_file_to(download_url, &temp_new_exe) {
-        Ok(()) => {
-            if let Err(e) = spawn_updater_and_restart(&temp_new_exe) {
-                let title = to_wide_null("Update Error - IrisTray");
-                let msg = to_wide_null(&format!("Failed to apply update automatically:\n{e}\nOpening release page in browser instead."));
+    if let Err(e) = download_file_to(download_url, &temp_new_exe) {
+        let title = to_wide_null("Download Failed - IrisTray");
+        let msg = to_wide_null(&format!(
+            "Could not download update:\n{e}\nWould you like to open the release page in your browser?"
+        ));
+        let res = unsafe {
+            MessageBoxW(
+                parent,
+                msg.as_ptr(),
+                title.as_ptr(),
+                windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONERROR
+                    | windows_sys::Win32::UI::WindowsAndMessaging::MB_YESNO,
+            )
+        };
+        if res == windows_sys::Win32::UI::WindowsAndMessaging::IDYES {
+            open_url_in_browser(&info.release_url);
+        }
+        return;
+    }
+
+    // Cryptographic verification: Verify binary against official release checksums.txt
+    if let Some(chk_url) = &info.checksums_download_url {
+        match download_file_to(chk_url, &temp_checksums) {
+            Ok(()) => {
+                let checksums_content =
+                    std::fs::read_to_string(&temp_checksums).unwrap_or_default();
+                let _ = std::fs::remove_file(&temp_checksums);
+
+                match parse_sha256_checksum(&checksums_content, "IrisTray.exe") {
+                    Some(expected_hash) => match compute_file_sha256(&temp_new_exe) {
+                        Ok(actual_hash) => {
+                            if actual_hash != expected_hash {
+                                let _ = std::fs::remove_file(&temp_new_exe);
+                                let title = to_wide_null("Security Verification Failed - IrisTray");
+                                let msg = to_wide_null(&format!(
+                                    "Integrity check failed: downloaded binary checksum does not match official release.\n\n\
+                                     Expected: {expected_hash}\n\
+                                     Actual:   {actual_hash}\n\n\
+                                     The downloaded file has been deleted for your safety."
+                                ));
+                                unsafe {
+                                    MessageBoxW(
+                                        parent,
+                                        msg.as_ptr(),
+                                        title.as_ptr(),
+                                        MB_ICONERROR | MB_OK,
+                                    );
+                                }
+                                open_url_in_browser(&info.release_url);
+                                return;
+                            }
+                        }
+                        Err(e) => {
+                            let _ = std::fs::remove_file(&temp_new_exe);
+                            let title = to_wide_null("Verification Error - IrisTray");
+                            let msg = to_wide_null(&format!(
+                                "Could not compute SHA-256 hash of update:\n{e}"
+                            ));
+                            unsafe {
+                                MessageBoxW(
+                                    parent,
+                                    msg.as_ptr(),
+                                    title.as_ptr(),
+                                    MB_ICONERROR | MB_OK,
+                                );
+                            }
+                            open_url_in_browser(&info.release_url);
+                            return;
+                        }
+                    },
+                    None => {
+                        let _ = std::fs::remove_file(&temp_new_exe);
+                        let title = to_wide_null("Security Verification Failed - IrisTray");
+                        let msg = to_wide_null(
+                            "Release checksums.txt does not contain an entry for IrisTray.exe. Update aborted for safety.",
+                        );
+                        unsafe {
+                            MessageBoxW(parent, msg.as_ptr(), title.as_ptr(), MB_ICONERROR | MB_OK);
+                        }
+                        open_url_in_browser(&info.release_url);
+                        return;
+                    }
+                }
+            }
+            Err(e) => {
+                let _ = std::fs::remove_file(&temp_new_exe);
+                let title = to_wide_null("Security Verification Failed - IrisTray");
+                let msg = to_wide_null(&format!(
+                    "Failed to download official checksums.txt for verification:\n{e}\nUpdate aborted for safety."
+                ));
                 unsafe {
                     MessageBoxW(parent, msg.as_ptr(), title.as_ptr(), MB_ICONERROR | MB_OK);
                 }
                 open_url_in_browser(&info.release_url);
-            } else {
-                // Exit current process cleanly so updater script can overwrite binary
-                std::process::exit(0);
+                return;
             }
         }
-        Err(e) => {
-            let title = to_wide_null("Download Failed - IrisTray");
-            let msg = to_wide_null(&format!("Could not download update:\n{e}\nWould you like to open the release page in your browser?"));
-            let res = unsafe {
-                MessageBoxW(
-                    parent,
-                    msg.as_ptr(),
-                    title.as_ptr(),
-                    windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONERROR
-                        | windows_sys::Win32::UI::WindowsAndMessaging::MB_YESNO,
-                )
-            };
-            if res == windows_sys::Win32::UI::WindowsAndMessaging::IDYES {
-                open_url_in_browser(&info.release_url);
-            }
+    } else {
+        // Checksums file missing from release assets - refuse to execute unverified binary
+        let _ = std::fs::remove_file(&temp_new_exe);
+        let title = to_wide_null("Security Verification Required - IrisTray");
+        let msg = to_wide_null(
+            "Official release checksums (checksums.txt) were not found on this release. Update aborted for safety.",
+        );
+        unsafe {
+            MessageBoxW(parent, msg.as_ptr(), title.as_ptr(), MB_ICONERROR | MB_OK);
         }
+        open_url_in_browser(&info.release_url);
+        return;
+    }
+
+    // Launch updater helper and restart
+    if let Err(e) = spawn_updater_and_restart(&temp_new_exe) {
+        let title = to_wide_null("Update Error - IrisTray");
+        let msg = to_wide_null(&format!(
+            "Failed to apply update automatically:\n{e}\nOpening release page in browser instead."
+        ));
+        unsafe {
+            MessageBoxW(parent, msg.as_ptr(), title.as_ptr(), MB_ICONERROR | MB_OK);
+        }
+        open_url_in_browser(&info.release_url);
+    } else {
+        // Exit current process cleanly so updater script can overwrite binary
+        std::process::exit(0);
     }
 }
 
@@ -790,5 +999,58 @@ mod tests {
         assert!(is_newer_version("v2.0.0", "1.99.99"));
         assert!(!is_newer_version("v1.0.0", "1.0.0"));
         assert!(!is_newer_version("v0.9.9", "1.0.0"));
+    }
+
+    #[test]
+    fn test_sanitize_version_tag() {
+        assert_eq!(sanitize_version_tag("v1.2.3"), "v1.2.3");
+        assert_eq!(sanitize_version_tag("../../evil.exe"), "evil.exe");
+        assert_eq!(sanitize_version_tag(r"..\..\ProgramData\bad"), "bad");
+        assert_eq!(
+            sanitize_version_tag("v1.0.0-beta.1_test"),
+            "v1.0.0-beta.1_test"
+        );
+        assert_eq!(sanitize_version_tag("../../../"), "update");
+        assert_eq!(sanitize_version_tag(".."), "update");
+        assert_eq!(sanitize_version_tag(""), "update");
+    }
+
+    #[test]
+    fn test_parse_sha256_checksum() {
+        let sample = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  IrisTray.exe\n\
+                      a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90 *IrisTray-v1.1.3.zip\n";
+
+        assert_eq!(
+            parse_sha256_checksum(sample, "IrisTray.exe"),
+            Some("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string())
+        );
+        assert_eq!(
+            parse_sha256_checksum(sample, "iristray-v1.1.3.zip"),
+            Some("a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90".to_string())
+        );
+        assert_eq!(parse_sha256_checksum(sample, "nonexistent.exe"), None);
+
+        // Invalid hash lengths should be rejected
+        let invalid_hash = "1234abcd  IrisTray.exe\n";
+        assert_eq!(parse_sha256_checksum(invalid_hash, "IrisTray.exe"), None);
+    }
+
+    #[test]
+    fn test_compute_file_sha256() {
+        use std::io::Write;
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("iristray_test_hash.txt");
+        let mut f = File::create(&test_file).expect("should create temp test file");
+        f.write_all(b"hello world\n").expect("write ok");
+        drop(f);
+
+        let hash = compute_file_sha256(&test_file).expect("should compute sha256 via BCrypt");
+        let _ = std::fs::remove_file(&test_file);
+
+        // SHA-256 of "hello world\n" (LF) is a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447
+        assert_eq!(
+            hash,
+            "a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447"
+        );
     }
 }
