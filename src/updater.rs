@@ -69,6 +69,10 @@ pub struct UpdateInfo {
 }
 
 pub fn open_url_in_browser(url: &str) {
+    if !url.starts_with("https://") {
+        eprintln!("Blocked attempt to open non-HTTPS URL: {url}");
+        return;
+    }
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
@@ -249,6 +253,7 @@ fn fetch_github_latest_release_json() -> Result<String, String> {
         }
 
         let mut response_bytes = Vec::new();
+        const MAX_API_RESPONSE_SIZE: usize = 1024 * 1024; // 1 MB limit
         loop {
             let mut bytes_avail: u32 = 0;
             if WinHttpQueryDataAvailable(h_request, &mut bytes_avail) == 0 {
@@ -271,6 +276,9 @@ fn fetch_github_latest_release_json() -> Result<String, String> {
             }
 
             chunk.truncate(bytes_read as usize);
+            if response_bytes.len() + chunk.len() > MAX_API_RESPONSE_SIZE {
+                return Err("API response exceeded maximum size limit (1MB)".to_string());
+            }
             response_bytes.extend_from_slice(&chunk);
         }
 
@@ -333,7 +341,10 @@ pub fn download_file_to(url: &str, destination: &Path) -> Result<(), String> {
         path_w.push(0);
 
         let is_https = comp.nScheme == 2; // INTERNET_SCHEME_HTTPS
-        let flags = if is_https { WINHTTP_FLAG_SECURE } else { 0 };
+        if !is_https {
+            return Err("Insecure download URL rejected: HTTPS is required".to_string());
+        }
+        let flags = WINHTTP_FLAG_SECURE;
 
         let h_connect = WinHttpConnect(h_session, host_w.as_ptr(), comp.nPort, 0);
         if h_connect.is_null() {
@@ -390,6 +401,9 @@ pub fn download_file_to(url: &str, destination: &Path) -> Result<(), String> {
         let mut file = File::create(destination)
             .map_err(|e| format!("Failed to create destination file: {e}"))?;
 
+        const MAX_DOWNLOAD_SIZE: usize = 50 * 1024 * 1024; // 50 MB limit
+        let mut total_bytes: usize = 0;
+
         loop {
             let mut bytes_avail: u32 = 0;
             if WinHttpQueryDataAvailable(h_request, &mut bytes_avail) == 0 {
@@ -411,7 +425,15 @@ pub fn download_file_to(url: &str, destination: &Path) -> Result<(), String> {
                 break;
             }
 
-            file.write_all(&chunk[..bytes_read as usize])
+            let read_len = bytes_read as usize;
+            total_bytes += read_len;
+            if total_bytes > MAX_DOWNLOAD_SIZE {
+                drop(file);
+                let _ = std::fs::remove_file(destination);
+                return Err("Download exceeded maximum size limit (50MB)".to_string());
+            }
+
+            file.write_all(&chunk[..read_len])
                 .map_err(|e| format!("Failed to write downloaded bytes: {e}"))?;
         }
 
