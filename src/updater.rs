@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use std::ptr;
-use windows_sys::Win32::Foundation::HWND;
+use windows_sys::Win32::Foundation::{FreeLibrary, HWND};
 use windows_sys::Win32::Networking::WinHttp::{
     WinHttpCloseHandle, WinHttpConnect, WinHttpCrackUrl, WinHttpOpen, WinHttpOpenRequest,
     WinHttpQueryDataAvailable, WinHttpQueryHeaders, WinHttpReadData, WinHttpReceiveResponse,
@@ -12,7 +12,9 @@ use windows_sys::Win32::Networking::WinHttp::{
     WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_QUERY_STATUS_CODE,
 };
 
-use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+use windows_sys::Win32::System::LibraryLoader::{
+    GetProcAddress, LoadLibraryExW, LOAD_LIBRARY_SEARCH_SYSTEM32,
+};
 use windows_sys::Win32::UI::Controls::{
     TASKDIALOGCONFIG, TASKDIALOG_BUTTON, TDCBF_CLOSE_BUTTON, TD_ERROR_ICON, TD_INFORMATION_ICON,
 };
@@ -27,13 +29,13 @@ unsafe fn call_task_dialog_indirect(
     pf_verification_flag_checked: *mut i32,
 ) -> i32 {
     let dll_name: Vec<u16> = "comctl32.dll\0".encode_utf16().collect();
-    let h_mod = LoadLibraryW(dll_name.as_ptr());
+    let h_mod = LoadLibraryExW(dll_name.as_ptr(), 0, LOAD_LIBRARY_SEARCH_SYSTEM32);
     if h_mod == 0 {
         return -1;
     }
     let fn_name = b"TaskDialogIndirect\0";
     let proc = GetProcAddress(h_mod, fn_name.as_ptr());
-    if let Some(proc) = proc {
+    let result = if let Some(proc) = proc {
         let func: FnTaskDialogIndirect = std::mem::transmute(proc);
         func(
             config,
@@ -43,7 +45,9 @@ unsafe fn call_task_dialog_indirect(
         )
     } else {
         -1
-    }
+    };
+    FreeLibrary(h_mod);
+    result
 }
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     MessageBoxW, MB_ICONERROR, MB_ICONINFORMATION, MB_OK,
@@ -459,7 +463,21 @@ pub fn spawn_updater_and_restart(new_exe_path: &Path) -> Result<(), String> {
 
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-    Command::new("powershell")
+    // Use absolute path to system PowerShell to prevent CWD/PATH hijacking
+    let system_root = env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+    let ps_path = std::path::PathBuf::from(system_root)
+        .join("System32")
+        .join("WindowsPowerShell")
+        .join("v1.0")
+        .join("powershell.exe");
+
+    let executable = if ps_path.exists() {
+        ps_path
+    } else {
+        std::path::PathBuf::from("powershell.exe")
+    };
+
+    Command::new(executable)
         .creation_flags(CREATE_NO_WINDOW)
         .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &script])
         .spawn()
