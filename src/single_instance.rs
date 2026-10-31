@@ -4,7 +4,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     MessageBoxW, MB_ICONINFORMATION, MB_SETFOREGROUND,
 };
 
-const MUTEX_NAME: &str = "PressPlay_IrisTray_SingleInstance_Mutex";
+const MUTEX_NAME: &str = "Local\\PressPlay_IrisTray_SingleInstance_Mutex";
 
 pub struct SingleInstanceGuard {
     handle: HANDLE,
