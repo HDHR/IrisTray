@@ -531,7 +531,7 @@ pub fn show_about_dialog(parent: HWND, app_version: &str) -> AboutAction {
     let title = to_wide_null(&format!("About IrisTray v{app_version}"));
     let header = to_wide_null(&format!("IrisTray v{app_version}"));
     let content = to_wide_null(
-        "Battery monitor for Press Play IRIS v2 NearLink gaming mouse\n\nAuthor: HDHR\nRepository: github.com/HDHR/IrisTray",
+        "Battery monitor for Press Play IRIS v2 NearLink gaming mouse\n\nAuthor: HDHR",
     );
     let btn_check_text = to_wide_null("Check for Updates");
     let btn_repo_text = to_wide_null("Visit Repository");
@@ -577,7 +577,7 @@ pub fn show_about_dialog(parent: HWND, app_version: &str) -> AboutAction {
     } else {
         // Fallback to basic MessageBoxW if TaskDialogIndirect fails
         let msg = to_wide_null(&format!(
-            "IrisTray v{}\nBattery monitor for Press Play IRIS v2\nAuthor: HDHR\nhttps://github.com/HDHR/IrisTray",
+            "IrisTray v{}\nBattery monitor for Press Play IRIS v2\nAuthor: HDHR",
             app_version
         ));
         unsafe {
